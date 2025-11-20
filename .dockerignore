@@ -1,0 +1,13 @@
+node_modules
+npm-debug.log
+.git
+.gitignore
+.env
+session-data
+cache-data
+.wwebjs_auth
+.wwebjs_cache
+*.md
+docs
+tests
+.github

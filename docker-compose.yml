@@ -1,0 +1,24 @@
+version: '3.8'
+
+services:
+  whatsapp-web:
+    build: .
+    container_name: whatsapp-web-js
+    volumes:
+      # Mount session data to persist authentication
+      - ./session-data:/app/.wwebjs_auth
+      - ./cache-data:/app/.wwebjs_cache
+      # Mount your custom script if you want to use a different one
+      - ./example.js:/app/example.js
+    environment:
+      - NODE_ENV=production
+      # Set Puppeteer to use system Chrome
+      - PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
+      - PUPPETEER_EXECUTABLE_PATH=/usr/bin/google-chrome-stable
+    restart: unless-stopped
+    # Share X11 socket if you need to see the browser (for debugging)
+    # Uncomment these lines on Linux/Mac with X11
+    # environment:
+    #   - DISPLAY=:0
+    # volumes:
+    #   - /tmp/.X11-unix:/tmp/.X11-unix
