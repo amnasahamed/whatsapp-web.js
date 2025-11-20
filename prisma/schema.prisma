@@ -1,0 +1,665 @@
+// =============================================================================
+// WHATSAPP COMMAND CENTER - DATABASE SCHEMA
+// =============================================================================
+// This Prisma schema defines the complete database structure for the
+// WhatsApp Command Center application with enterprise-grade design patterns.
+// =============================================================================
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["fullTextSearch", "fullTextIndex"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// =============================================================================
+// USER & AUTHENTICATION MODELS
+// =============================================================================
+
+enum UserRole {
+  OWNER       // Full system access
+  ADMIN       // Administrative access
+  MANAGER     // Team management
+  AGENT       // Basic agent access
+  VIEWER      // Read-only access
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+}
+
+model User {
+  id            String       @id @default(cuid())
+  email         String       @unique
+  name          String
+  password      String // Bcrypt hashed
+  avatar        String?
+  role          UserRole     @default(AGENT)
+  status        UserStatus   @default(ACTIVE)
+  emailVerified DateTime?
+  lastLoginAt   DateTime?
+  preferences   Json?        // User preferences (theme, notifications, etc.)
+
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  // Relations
+  accounts              Account[]
+  sessions              Session[]
+  assignedConversations Conversation[]
+  messages              Message[]
+  notes                 ConversationNote[]
+  automations           Automation[]
+  campaigns             Campaign[]
+  apiKeys               ApiKey[]
+  activityLogs          ActivityLog[]
+
+  @@index([email])
+  @@index([role])
+  @@index([status])
+  @@map("users")
+}
+
+// NextAuth.js models
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+  @@map("accounts")
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("sessions")
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+  @@map("verification_tokens")
+}
+
+// =============================================================================
+// WHATSAPP ACCOUNT MODELS
+// =============================================================================
+
+enum WhatsAppStatus {
+  DISCONNECTED
+  CONNECTING
+  QR_CODE
+  AUTHENTICATED
+  READY
+  ERROR
+}
+
+model WhatsAppAccount {
+  id            String         @id @default(cuid())
+  name          String         // Friendly name for the account
+  phoneNumber   String?        @unique
+  sessionId     String         @unique // Internal session ID
+  status        WhatsAppStatus @default(DISCONNECTED)
+  qrCode        String?        @db.Text // Base64 QR code
+  lastSeen      DateTime?
+  profilePicUrl String?
+  businessName  String?
+
+  // Configuration
+  isActive      Boolean        @default(true)
+  config        Json?          // Puppeteer config, etc.
+
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  // Relations
+  contacts      Contact[]
+  conversations Conversation[]
+  messages      Message[]
+  automations   Automation[]
+  campaigns     Campaign[]
+
+  @@index([phoneNumber])
+  @@index([status])
+  @@index([isActive])
+  @@map("whatsapp_accounts")
+}
+
+// =============================================================================
+// CONTACT MODELS
+// =============================================================================
+
+model Contact {
+  id               String   @id @default(cuid())
+  whatsAppId       String   // WhatsApp internal ID (e.g., 1234567890@c.us)
+  phoneNumber      String
+  name             String?
+  profilePicUrl    String?
+  isBlocked        Boolean  @default(false)
+  isBusiness       Boolean  @default(false)
+
+  // Custom fields
+  email            String?
+  tags             String[] // Array of tags
+  customFields     Json?    // Flexible custom data
+
+  // Metadata
+  firstMessageAt   DateTime?
+  lastMessageAt    DateTime?
+  totalMessages    Int       @default(0)
+
+  // Relations
+  accountId        String
+  account          WhatsAppAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  // Relations
+  conversations    Conversation[]
+  sentMessages     Message[]      @relation("SentMessages")
+  receivedMessages Message[]      @relation("ReceivedMessages")
+
+  @@unique([accountId, whatsAppId])
+  @@index([accountId])
+  @@index([phoneNumber])
+  @@index([tags])
+  @@map("contacts")
+}
+
+// =============================================================================
+// CONVERSATION & MESSAGE MODELS
+// =============================================================================
+
+enum ConversationStatus {
+  OPEN
+  PENDING
+  RESOLVED
+  CLOSED
+}
+
+model Conversation {
+  id              String             @id @default(cuid())
+
+  // Relations
+  accountId       String
+  account         WhatsAppAccount    @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  contactId       String
+  contact         Contact            @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  assignedToId    String?
+  assignedTo      User?              @relation(fields: [assignedToId], references: [id])
+
+  // Status & metadata
+  status          ConversationStatus @default(OPEN)
+  isUnread        Boolean            @default(true)
+  isPinned        Boolean            @default(false)
+  isMuted         Boolean            @default(false)
+
+  // Timestamps
+  lastMessageAt   DateTime           @default(now())
+  closedAt        DateTime?
+
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+
+  // Relations
+  messages        Message[]
+  notes           ConversationNote[]
+
+  @@unique([accountId, contactId])
+  @@index([accountId])
+  @@index([contactId])
+  @@index([assignedToId])
+  @@index([status])
+  @@index([lastMessageAt])
+  @@map("conversations")
+}
+
+enum MessageType {
+  TEXT
+  IMAGE
+  VIDEO
+  AUDIO
+  DOCUMENT
+  STICKER
+  LOCATION
+  CONTACT
+  POLL
+  REACTION
+  SYSTEM
+}
+
+enum MessageStatus {
+  PENDING
+  SENT
+  DELIVERED
+  READ
+  FAILED
+}
+
+enum MessageDirection {
+  INBOUND
+  OUTBOUND
+}
+
+model Message {
+  id              String          @id @default(cuid())
+
+  // WhatsApp metadata
+  whatsAppId      String?         @unique // WhatsApp message ID
+  type            MessageType     @default(TEXT)
+  direction       MessageDirection
+  status          MessageStatus   @default(PENDING)
+
+  // Content
+  content         String          @db.Text
+  mediaUrl        String?         // URL to stored media
+  mediaMimeType   String?
+  mediaSize       Int?
+  caption         String?
+
+  // References
+  quotedMessageId String?
+  quotedMessage   Message?        @relation("QuotedMessages", fields: [quotedMessageId], references: [id])
+  quotes          Message[]       @relation("QuotedMessages")
+
+  // Relations
+  conversationId  String
+  conversation    Conversation    @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  accountId       String
+  account         WhatsAppAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  fromContactId   String
+  fromContact     Contact         @relation("SentMessages", fields: [fromContactId], references: [id])
+
+  toContactId     String
+  toContact       Contact         @relation("ReceivedMessages", fields: [toContactId], references: [id])
+
+  sentById        String?
+  sentBy          User?           @relation(fields: [sentById], references: [id])
+
+  // AI metadata
+  isAIGenerated   Boolean         @default(false)
+  aiProvider      String?
+  aiModel         String?
+  aiPromptTokens  Int?
+  aiResponseTokens Int?
+
+  // Timestamps
+  sentAt          DateTime?
+  deliveredAt     DateTime?
+  readAt          DateTime?
+
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  @@index([conversationId])
+  @@index([accountId])
+  @@index([fromContactId])
+  @@index([toContactId])
+  @@index([direction])
+  @@index([status])
+  @@index([createdAt])
+  @@map("messages")
+}
+
+model ConversationNote {
+  id             String       @id @default(cuid())
+  content        String       @db.Text
+
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  authorId       String
+  author         User         @relation(fields: [authorId], references: [id])
+
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@index([conversationId])
+  @@index([authorId])
+  @@map("conversation_notes")
+}
+
+// =============================================================================
+// AI CONFIGURATION MODELS
+// =============================================================================
+
+enum AIProvider {
+  OPENAI
+  ANTHROPIC
+  GEMINI
+  CUSTOM
+}
+
+model AIConfig {
+  id           String     @id @default(cuid())
+  name         String     // Friendly name
+  provider     AIProvider
+  isActive     Boolean    @default(false)
+  isDefault    Boolean    @default(false)
+
+  // Configuration
+  apiKey       String     @db.Text // Encrypted
+  model        String
+  maxTokens    Int        @default(2000)
+  temperature  Float      @default(0.7)
+  customEndpoint String?  // For custom LLMs
+
+  // Prompt configuration
+  systemPrompt String?    @db.Text
+  userPromptTemplate String? @db.Text
+
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  @@index([provider])
+  @@index([isActive])
+  @@index([isDefault])
+  @@map("ai_configs")
+}
+
+// =============================================================================
+// AUTOMATION MODELS
+// =============================================================================
+
+enum AutomationTriggerType {
+  MESSAGE_RECEIVED
+  MESSAGE_CONTAINS
+  NEW_CONTACT
+  SCHEDULED
+  WEBHOOK
+}
+
+enum AutomationActionType {
+  SEND_MESSAGE
+  TAG_CONTACT
+  ASSIGN_TO_USER
+  ADD_TO_CAMPAIGN
+  WEBHOOK_CALL
+  AI_RESPONSE
+}
+
+enum AutomationStatus {
+  ACTIVE
+  PAUSED
+  DRAFT
+}
+
+model Automation {
+  id          String             @id @default(cuid())
+  name        String
+  description String?
+  status      AutomationStatus   @default(DRAFT)
+
+  // Trigger configuration
+  triggerType AutomationTriggerType
+  triggerConditions Json          // Flexible trigger conditions
+
+  // Actions configuration
+  actions     Json               // Array of actions to execute
+
+  // Relations
+  accountId   String
+  account     WhatsAppAccount    @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  createdById String
+  createdBy   User               @relation(fields: [createdById], references: [id])
+
+  // Statistics
+  executionCount Int             @default(0)
+  lastExecutedAt DateTime?
+
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+
+  // Relations
+  executions  AutomationExecution[]
+
+  @@index([accountId])
+  @@index([status])
+  @@index([triggerType])
+  @@map("automations")
+}
+
+model AutomationExecution {
+  id           String      @id @default(cuid())
+
+  automationId String
+  automation   Automation  @relation(fields: [automationId], references: [id], onDelete: Cascade)
+
+  success      Boolean
+  error        String?     @db.Text
+  executionTime Int        // Milliseconds
+  metadata     Json?       // Execution context
+
+  executedAt   DateTime    @default(now())
+
+  @@index([automationId])
+  @@index([executedAt])
+  @@map("automation_executions")
+}
+
+// =============================================================================
+// CAMPAIGN MODELS
+// =============================================================================
+
+enum CampaignStatus {
+  DRAFT
+  SCHEDULED
+  RUNNING
+  COMPLETED
+  PAUSED
+  CANCELLED
+}
+
+model Campaign {
+  id            String         @id @default(cuid())
+  name          String
+  description   String?
+  status        CampaignStatus @default(DRAFT)
+
+  // Message template
+  messageTemplate String       @db.Text
+
+  // Targeting
+  targetContactTags String[]   // Target contacts with these tags
+  targetContacts Json?         // Specific contact IDs
+
+  // Scheduling
+  scheduledAt   DateTime?
+  startedAt     DateTime?
+  completedAt   DateTime?
+
+  // Relations
+  accountId     String
+  account       WhatsAppAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  createdById   String
+  createdBy     User            @relation(fields: [createdById], references: [id])
+
+  // Statistics
+  totalRecipients Int           @default(0)
+  sentCount      Int            @default(0)
+  deliveredCount Int            @default(0)
+  readCount      Int            @default(0)
+  failedCount    Int            @default(0)
+
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+
+  @@index([accountId])
+  @@index([status])
+  @@index([scheduledAt])
+  @@map("campaigns")
+}
+
+// =============================================================================
+// ANALYTICS & MONITORING MODELS
+// =============================================================================
+
+model AnalyticsMetric {
+  id         String   @id @default(cuid())
+  accountId  String
+
+  // Metric type
+  metricType String   // e.g., "messages_sent", "response_time", etc.
+  metricName String
+  value      Float
+
+  // Dimensions
+  dimensions Json?    // Additional data for grouping/filtering
+
+  // Timestamp (for time-series data)
+  timestamp  DateTime @default(now())
+  date       DateTime @default(now()) @db.Date
+
+  @@index([accountId])
+  @@index([metricType])
+  @@index([date])
+  @@index([timestamp])
+  @@map("analytics_metrics")
+}
+
+// =============================================================================
+// WEBHOOK MODELS
+// =============================================================================
+
+enum WebhookEvent {
+  MESSAGE_RECEIVED
+  MESSAGE_SENT
+  CONVERSATION_ASSIGNED
+  CONTACT_CREATED
+}
+
+enum WebhookStatus {
+  ACTIVE
+  INACTIVE
+}
+
+model Webhook {
+  id          String        @id @default(cuid())
+  name        String
+  url         String
+  events      WebhookEvent[]
+  status      WebhookStatus @default(ACTIVE)
+
+  // Security
+  secret      String?       // For signature verification
+
+  // Configuration
+  retryOnFailure Boolean    @default(true)
+  maxRetries  Int           @default(3)
+
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  // Relations
+  deliveries  WebhookDelivery[]
+
+  @@index([status])
+  @@map("webhooks")
+}
+
+model WebhookDelivery {
+  id          String   @id @default(cuid())
+
+  webhookId   String
+  webhook     Webhook  @relation(fields: [webhookId], references: [id], onDelete: Cascade)
+
+  event       WebhookEvent
+  payload     Json
+
+  success     Boolean
+  statusCode  Int?
+  response    String?  @db.Text
+  error       String?  @db.Text
+
+  attemptNumber Int    @default(1)
+
+  createdAt   DateTime @default(now())
+
+  @@index([webhookId])
+  @@index([success])
+  @@index([createdAt])
+  @@map("webhook_deliveries")
+}
+
+// =============================================================================
+// API KEY MODELS
+// =============================================================================
+
+model ApiKey {
+  id          String   @id @default(cuid())
+  name        String
+  key         String   @unique // Hashed API key
+  permissions Json     // Scoped permissions
+
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  lastUsedAt  DateTime?
+  expiresAt   DateTime?
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([userId])
+  @@index([key])
+  @@map("api_keys")
+}
+
+// =============================================================================
+// ACTIVITY LOG MODELS
+// =============================================================================
+
+model ActivityLog {
+  id          String   @id @default(cuid())
+
+  userId      String?
+  user        User?    @relation(fields: [userId], references: [id])
+
+  action      String   // e.g., "user.login", "message.sent"
+  entityType  String?  // e.g., "Message", "Contact"
+  entityId    String?
+
+  metadata    Json?    // Additional context
+  ipAddress   String?
+  userAgent   String?
+
+  createdAt   DateTime @default(now())
+
+  @@index([userId])
+  @@index([action])
+  @@index([createdAt])
+  @@map("activity_logs")
+}
