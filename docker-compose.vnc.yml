@@ -1,0 +1,16 @@
+version: '3.8'
+
+services:
+  whatsapp-web-vnc:
+    build:
+      context: .
+      dockerfile: Dockerfile.vnc
+    container_name: whatsapp-web-js-vnc
+    ports:
+      - "5900:5900"  # VNC port
+    volumes:
+      - ./session-data:/app/.wwebjs_auth
+      - ./cache-data:/app/.wwebjs_cache
+    environment:
+      - DISPLAY=:99
+    restart: unless-stopped
