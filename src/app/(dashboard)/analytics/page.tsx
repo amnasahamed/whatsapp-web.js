@@ -49,7 +49,7 @@ const messageVolumeData = [
   { date: 'Mon', inbound: 245, outbound: 198 },
   { date: 'Tue', inbound: 312, outbound: 276 },
   { date: 'Wed', inbound: 289, outbound: 234 },
-  { date: 'Thu', inbound: 401, inbound: 367 },
+  { date: 'Thu', inbound: 401, outbound: 367 },
   { date: 'Fri', inbound: 456, outbound: 423 },
   { date: 'Sat', inbound: 187, outbound: 156 },
   { date: 'Sun', inbound: 145, outbound: 123 },
