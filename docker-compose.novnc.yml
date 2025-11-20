@@ -1,0 +1,16 @@
+version: '3.8'
+
+services:
+  whatsapp-web-novnc:
+    build:
+      context: .
+      dockerfile: Dockerfile.novnc
+    container_name: whatsapp-web-js-novnc
+    ports:
+      - "6080:6080"  # noVNC web port
+    volumes:
+      - ./session-data:/app/.wwebjs_auth
+      - ./cache-data:/app/.wwebjs_cache
+    environment:
+      - DISPLAY=:99
+    restart: unless-stopped
