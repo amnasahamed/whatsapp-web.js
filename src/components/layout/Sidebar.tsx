@@ -18,6 +18,7 @@ import {
   Settings,
   Zap,
   BarChart3,
+  Send,
   LogOut,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -43,6 +44,11 @@ const menuItems: MenuItem[] = [
     name: 'Contacts',
     href: '/contacts',
     icon: Users,
+  },
+  {
+    name: 'Campaigns',
+    href: '/campaigns',
+    icon: Send,
   },
   {
     name: 'Automations',
