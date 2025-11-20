@@ -349,9 +349,11 @@ exports.LoadUtils = () => {
             const link = window.Store.Validators.findLink(content);
             if (link) {
                 const preview = await window.Store.LinkPreview.getLinkPreview(link);
-                preview.preview = true;
-                preview.subtype = 'url';
-                options = { ...options, ...preview };
+                if (preview) {
+                    preview.preview = true;
+                    preview.subtype = 'url';
+                    options = { ...options, ...preview };
+                }
             }
         }
 
